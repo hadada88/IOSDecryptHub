@@ -32,7 +32,7 @@ jobs:
           xcodebuild -version
           clang --version
           dpkg-deb --version
-          ldid -V
+          command -v ldid
 
       - name: Build RootHide deb
         run: make deb-roothide
