@@ -16,7 +16,6 @@
 #define PREFS_DOMAIN    DH_DOMAIN_LOADER
 #define PREFS_KEY       DH_KEY_BUNDLES
 #define PREFS_PATH      DH_LEGACY_CONFIG_PATH
-#define CONFIG_NAME     DH_CONFIG_REL
 
 // rootless 下 /var/jb 只是引导期别名，宿主沙盒中不一定可见。优先从 loader 的 dyld
 // 实际路径推导同一 bootstrap 下的主 dylib，再兼容固定路径。
@@ -24,12 +23,12 @@ static NSArray<NSString *> *dh_dylib_candidates(void) {
     NSMutableArray<NSString *> *paths = [NSMutableArray array];
     Dl_info info = {0};
     if (dladdr((const void *)&dh_dylib_candidates, &info) != 0 && info.dli_fname) {
-        NSString *loaderPath = [NSString stringWithUTF8String:info.dli_fname];
-        NSString *libDir = [[loaderPath stringByDeletingLastPathComponent]
-            stringByDeletingLastPathComponent];
-        if (libDir.length) {
-            [paths addObject:[libDir stringByAppendingPathComponent:
-                @"IOSDecryptHub/decrypt_helper.dylib"]];
+        // loader 位于 <bootstrap>/Library/MobileSubstrate/DynamicLibraries/。
+        NSString *root = [NSString stringWithUTF8String:info.dli_fname];
+        for (int i = 0; i < 4; i++) root = [root stringByDeletingLastPathComponent];
+        if (root.length > 1) {
+            [paths addObject:[root stringByAppendingPathComponent:
+                @"usr/lib/IOSDecryptHub/decrypt_helper.dylib"]];
         }
     }
     [paths addObject:@"/var/jb/usr/lib/IOSDecryptHub/decrypt_helper.dylib"];
@@ -40,11 +39,12 @@ static NSArray<NSString *> *dh_config_candidates(void) {
     NSMutableArray<NSString *> *paths = [NSMutableArray array];
     Dl_info info = {0};
     if (dladdr((const void *)&dh_config_candidates, &info) != 0 && info.dli_fname) {
-        NSString *loaderPath = [NSString stringWithUTF8String:info.dli_fname];
-        NSString *libDir = [[loaderPath stringByDeletingLastPathComponent]
-            stringByDeletingLastPathComponent];
-        if (libDir.length) {
-            [paths addObject:[libDir stringByAppendingPathComponent:CONFIG_NAME]];
+        // 与主 dylib 使用同一套四级回退，兼容 RootHide 的真实 bootstrap 路径。
+        NSString *root = [NSString stringWithUTF8String:info.dli_fname];
+        for (int i = 0; i < 4; i++) root = [root stringByDeletingLastPathComponent];
+        if (root.length > 1) {
+            [paths addObject:[root stringByAppendingPathComponent:
+                @"usr/lib/IOSDecryptHub/config/enabledBundles.plist"]];
         }
     }
     [paths addObject:@"/var/jb/usr/lib/IOSDecryptHub/config/enabledBundles.plist"];
