@@ -8,14 +8,15 @@
 //   /var/jb/usr/lib/IOSDecryptHub/decrypt_helper.dylib
 
 #import <Foundation/Foundation.h>
+#import "dh_shared.h"
 #import <dlfcn.h>
 #import <syslog.h>
 
 #define LOADER_TAG      "[IOSDecryptHub]"
-#define PREFS_DOMAIN    @"com.iosdecrypthub.loader"
-#define PREFS_KEY       @"enabledBundles"
-#define PREFS_PATH      @"/var/mobile/Library/Preferences/com.iosdecrypthub.loader.plist"
-#define CONFIG_NAME    @"IOSDecryptHub/config/enabledBundles.plist"
+#define PREFS_DOMAIN    DH_DOMAIN_LOADER
+#define PREFS_KEY       DH_KEY_BUNDLES
+#define PREFS_PATH      DH_LEGACY_CONFIG_PATH
+#define CONFIG_NAME     DH_CONFIG_REL
 
 // rootless 下 /var/jb 只是引导期别名，宿主沙盒中不一定可见。优先从 loader 的 dyld
 // 实际路径推导同一 bootstrap 下的主 dylib，再兼容固定路径。
@@ -50,6 +51,22 @@ static NSArray<NSString *> *dh_config_candidates(void) {
     return paths;
 }
 
+static NSArray *_Nullable dh_user_enabled_bundles(void) {
+    NSDictionary *prefs = [NSDictionary dictionaryWithContentsOfFile:PREFS_PATH];
+    id enabled = prefs[PREFS_KEY];
+    if ([enabled isKindOfClass:[NSArray class]]) return enabled;
+
+    CFPreferencesAppSynchronize((__bridge CFStringRef)PREFS_DOMAIN);
+    CFPropertyListRef value = CFPreferencesCopyAppValue(
+        (__bridge CFStringRef)PREFS_KEY,
+        (__bridge CFStringRef)PREFS_DOMAIN);
+    if (value && CFGetTypeID(value) == CFArrayGetTypeID()) {
+        return CFBridgingRelease(value);
+    }
+    if (value) CFRelease(value);
+    return nil;
+}
+
 // 说明：曾短暂加过"我们自己的组件不注入"的特例（想让管理器 App 里不弹悬浮窗），
 // 已撤销 —— 用户反馈里看到的悬浮窗真正原因是"开关被打开了"，不是产品行为异常。
 // 开关语义保持处处一致：列在名单里的 App 就会被注入，没有例外。
@@ -63,29 +80,19 @@ static BOOL dh_should_inject(NSString *bundleID) {
     if ([bundleID hasPrefix:@"com.apple."]) return NO;
 
 
-    NSArray *enabled = nil;
+    NSArray *enabled = dh_user_enabled_bundles();
     @try {
+        // RootHide 下优先使用 mobile 可写的副本，避免旧的空配置遮蔽新名单。
+        if ([enabled isKindOfClass:[NSArray class]]) {
+            return [enabled containsObject:bundleID];
+        }
+
         // 插件自带配置与主 dylib 位于同一越狱授权路径，不受宿主 App 偏好容器隔离。
         NSDictionary *prefs = nil;
         for (NSString *configPath in dh_config_candidates()) {
             prefs = [NSDictionary dictionaryWithContentsOfFile:configPath];
             enabled = prefs[PREFS_KEY];
             if ([enabled isKindOfClass:[NSArray class]]) break;
-        }
-
-        // 兼容旧版直接写入 /var/mobile/Library/Preferences 的配置。
-        if (![enabled isKindOfClass:[NSArray class]]) {
-            prefs = [NSDictionary dictionaryWithContentsOfFile:PREFS_PATH];
-            enabled = prefs[PREFS_KEY];
-        }
-
-        if (![enabled isKindOfClass:[NSArray class]]) {
-            // 通过 cfprefsd 按应用域读取，避免宿主 App 的容器视图隔离共享 plist。
-            CFPreferencesAppSynchronize((__bridge CFStringRef)PREFS_DOMAIN);
-            CFPropertyListRef value = CFPreferencesCopyAppValue(
-                (__bridge CFStringRef)PREFS_KEY,
-                (__bridge CFStringRef)PREFS_DOMAIN);
-            enabled = CFBridgingRelease(value);
         }
 
         if (![enabled isKindOfClass:[NSArray class]]) {

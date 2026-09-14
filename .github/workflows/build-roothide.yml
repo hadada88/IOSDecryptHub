@@ -1,0 +1,45 @@
+name: Build RootHide package
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "app/**"
+      - "src/**"
+      - "daemon/**"
+      - "vendor/dylib/roothide/**"
+      - "Filter.plist"
+      - "enabledBundles.default.plist"
+      - "Makefile"
+      - "build_deb.sh"
+      - ".github/workflows/build-roothide.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build-roothide:
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install packaging tools
+        run: brew install dpkg ldid
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          clang --version
+          dpkg-deb --version
+          ldid -V
+
+      - name: Build RootHide deb
+        run: make deb-roothide
+
+      - name: Upload RootHide deb
+        uses: actions/upload-artifact@v4
+        with:
+          name: iosdecrypthub-roothide-${{ github.sha }}
+          path: build/deb/com.iosdecrypthub_*_roothide.deb
+          if-no-files-found: error

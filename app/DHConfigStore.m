@@ -53,33 +53,72 @@ static NSString *_Nullable dh_config_path(void) {
     return paths.firstObject;
 }
 
+static NSArray<NSString *> *dh_config_read_paths(void) {
+    NSMutableArray<NSString *> *paths = [NSMutableArray array];
+    [paths addObject:DH_LEGACY_CONFIG_PATH];
+
+    NSString *root = DHBootstrapRoot();
+    if (root) {
+        [paths addObject:[root stringByAppendingPathComponent:DH_CONFIG_REL]];
+    }
+    [paths addObject:@"/var/jb/usr/lib/IOSDecryptHub/config/enabledBundles.plist"];
+    return paths;
+}
+
+static NSArray *_Nullable dh_enabled_values_from_file(NSString *path) {
+    NSDictionary *domain = [NSDictionary dictionaryWithContentsOfFile:path];
+    id value = domain[DH_KEY_BUNDLES];
+    return [value isKindOfClass:[NSArray class]] ? value : nil;
+}
+
 NSSet<NSString *> *DHReadEnabledBundles(void) {
     @try {
-        NSDictionary *domain = [NSDictionary dictionaryWithContentsOfFile:dh_config_path()];
-        id value = domain[DH_KEY_BUNDLES];
-        if ([value isKindOfClass:[NSArray class]]) return [NSSet setWithArray:value];
+        for (NSString *path in dh_config_read_paths()) {
+            NSArray *values = dh_enabled_values_from_file(path);
+            if (values) return [NSSet setWithArray:values];
+        }
+
+        CFPreferencesAppSynchronize((__bridge CFStringRef)DH_DOMAIN_LOADER);
+        CFPropertyListRef value = CFPreferencesCopyAppValue(
+            (__bridge CFStringRef)DH_KEY_BUNDLES,
+            (__bridge CFStringRef)DH_DOMAIN_LOADER);
+        if (value && CFGetTypeID(value) == CFArrayGetTypeID()) {
+            NSArray *values = [(__bridge NSArray *)value copy];
+            CFRelease(value);
+            return [NSSet setWithArray:values];
+        }
+        if (value) CFRelease(value);
     } @catch (__unused NSException *e) {
     }
     return [NSSet set];
 }
 
 BOOL DHWriteEnabledBundles(NSSet<NSString *> *bundleIDs) {
-    NSString *path = dh_config_path();
-    if (!path) return NO;
     NSArray *values = [[bundleIDs allObjects] sortedArrayUsingSelector:@selector(compare:)];
+    BOOL wroteLegacy = NO;
+    BOOL wroteBootstrap = NO;
     @try {
-        // loader 认这个文件：权威写入
-        if (![@{DH_KEY_BUNDLES: values} writeToFile:path atomically:YES]) return NO;
-        // cfprefs 同步一份，兼容旧读取路径；失败不影响结果
+        // RootHide 的 jbroot 可能对管理器 App 不可写；先写 mobile 自己可写的副本。
+        wroteLegacy = [@{DH_KEY_BUNDLES: values}
+            writeToFile:DH_LEGACY_CONFIG_PATH atomically:YES];
+
+        // 正常情况下仍同步越狱目录，供旧版加载器读取。
+        NSString *path = dh_config_path();
+        if (path.length) {
+            wroteBootstrap = [@{DH_KEY_BUNDLES: values}
+                writeToFile:path atomically:YES];
+        }
+
+        // 加载器会在越狱目录不可用时回退到这里。
         CFPreferencesSetValue((__bridge CFStringRef)DH_KEY_BUNDLES,
             (__bridge CFPropertyListRef)values,
             (__bridge CFStringRef)DH_DOMAIN_LOADER,
             kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
         CFPreferencesSynchronize((__bridge CFStringRef)DH_DOMAIN_LOADER,
             kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
-        return YES;
+        return wroteLegacy || wroteBootstrap;
     } @catch (__unused NSException *e) {
-        return NO;
+        return wroteLegacy || wroteBootstrap;
     }
 }
 

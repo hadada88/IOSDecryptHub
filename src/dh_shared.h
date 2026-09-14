@@ -2,6 +2,7 @@
 //
 // 单一事实源（两边只认这些路径与键，不各自发明）：
 //   名单: <bootstrap>/usr/lib/IOSDecryptHub/config/enabledBundles.plist  (mobile 可写)
+//         RootHide 不可写时回退到 DH_LEGACY_CONFIG_PATH
 //   引擎: <bootstrap>/usr/lib/IOSDecryptHub/decrypt_helper.dylib         (root 专属，daemon 写)
 //   元信息: <bootstrap>/usr/lib/IOSDecryptHub/version.plist              {version, variant, arch}
 //   状态: <bootstrap>/usr/lib/IOSDecryptHub/state.plist                  (daemon 写 0644，App 只读)
@@ -26,6 +27,7 @@
 #define DH_STATE_FILE     @"state.plist"
 
 #define DH_REQUEST_PATH   @"/var/mobile/Library/Preferences/com.iosdecrypthub.updater.request.plist"
+#define DH_LEGACY_CONFIG_PATH @"/var/mobile/Library/Preferences/com.iosdecrypthub.loader.plist"
 #define DH_NOTIFY_STATE   @"com.iosdecrypthub.updater.state"
 
 // 更新来源：先走 releases/latest 的 302 拿 tag（不耗 GitHub API 配额，共享出口/VPN
